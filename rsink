@@ -1,0 +1,304 @@
+#!/bin/bash -e
+
+# The MIT License (MIT)
+
+# Copyright (c) 2016 Andrew J Li
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+
+set -o pipefail
+set -o errexit
+
+LOCAL="$(pwd)"
+CONFIG=".rsink"
+REMOTE_HOST=
+DEST_DIR=
+XOPT=
+CHECK_SHORT=
+
+add_remote(){
+  local name="$3"
+  local url="$4"
+  local line=
+
+  if [ "$1" == "remote" ] && [ "$2" == "add" ]
+  then
+
+    line="$(find_remote_name ${name})"
+
+    if [ ! -z "${line}" ]
+    then
+      echo "error: remote ${name} already exists"
+      exit 1
+    else
+      # add new remote to our configuration file
+      echo "${name} ${url}" >> "${CONFIG}"
+    fi
+
+  fi
+  exit $?;
+}
+
+remove_remote(){
+  local name="$3"
+  local url="$4"
+  local line=
+
+  if [ "$1" == "remote" ] && [ "$2" == "remove" ]
+  then
+
+    line="$(find_remote_name ${name})"
+
+    if [ ! -z "${line}" ]
+    then
+      # exists; perform removal using inverse grep
+      local result=$(grep -v "${line}" "${CONFIG}")
+      if [ "${result}" == "" ]
+      then
+        echo " " > temp
+      else
+        echo "${output}" > temp
+      fi
+      mv temp "${CONFIG}"
+    else
+      echo "error removing: remote ${name} does not exist"
+      exit 1
+    fi
+
+  fi
+  exit $?;
+}
+
+validate_remote(){
+  local remote="$1"
+
+  local line=$(find_remote_name ${remote})
+
+  if [ ! -z "${line}" ]
+  then
+    REMOTE_HOST="$(echo ${line} | cut -d ' ' -f2)"
+  else
+    echo "error: could not find remote name"
+    exit 1
+  fi
+
+  # check if destination directory exists
+  if [[ "${REMOTE_HOST}" == *":"* ]]
+  then
+    # separate remote_host from destination directory
+    REMOTE_HOST="$(echo ${line} | cut -d ' ' -f2 | cut -d ':' -f1)"
+    DEST_DIR="$(echo ${line} | cut -d ' ' -f2 | cut -d ':' -f2)"
+  else
+    echo "error: could not find remote destination directory"
+    exit 1
+  fi
+}
+
+find_remote_name(){
+  local name="$1"
+
+  while read line
+  do
+    linename="$(echo ${line} | cut -d ' ' -f1)"
+
+    if [ "${linename}" == "${name}" ]
+    then
+      echo "${line}"
+      exit 0
+    fi
+  done <"${CONFIG}"
+}
+
+initialize(){
+    if [ ! -e "${CONFIG}" ]
+    then
+      touch "${CONFIG}"
+    fi
+}
+
+push(){
+  validate_remote "$1"
+  PATH_1="${LOCAL}/"
+  PATH_2="${REMOTE_HOST}:${DEST_DIR}"
+}
+
+pull(){
+  validate_remote "$1"
+  PATH_1="${REMOTE_HOST}:${DEST_DIR}/"
+  PATH_2="${LOCAL}"
+}
+
+usage(){
+  echo "usage: ${0} <command> [options]"
+  exit 1
+}
+
+validate_options(){
+    case $1 in
+        -n|--dry-run)
+          XOPT="${XOPT}--dry-run "
+          shift
+          ;;
+        -q|--quiet)
+          XOPT="${XOPT}--quiet "
+          shift
+          ;;
+        -v|--verbose)
+          XOPT="${XOPT}--verbose "
+          shift
+          ;;
+        -a|--archive)
+          XOPT="${XOPT}--archive "
+          shift
+          ;;
+        -r|--recursive)
+          XOPT="${XOPT}--recursive "
+          shift
+          ;;
+        -t|--times)
+          XOPT="${XOPT}--times "
+          shift
+          ;;
+        --size-only)
+          XOPT="${XOPT}--size-only "
+          shift
+          ;;
+        -i|--itemize-changes)
+          XOPT="${XOPT}--itemize-changes "
+          shift
+          ;;
+        -u|--update)
+          XOPT="${XOPT}--update "
+          shift
+          ;;
+        --delete)
+          XOPT="${XOPT}--delete "
+          shift
+          ;;
+        -h|--human-readable)
+          XOPT="${XOPT}--human-readable "
+          shift
+          ;;
+        --progress)
+          XOPT="${XOPT}--progress "
+          shift
+          ;;
+        -z|--compress)
+          XOPT="${XOPT}--compress "
+          shift
+          ;;
+        -*)
+          CHECK_SHORT="true"
+          ;;
+        *)          # unknown option
+          usage
+          ;;
+    esac
+}
+
+if [ "$1" == "init" ]
+then
+  initialize
+  exit 0
+fi
+
+if [ ! -e "./${CONFIG}" ]
+then
+  echo "error not a ${0} configured project"
+  exit 1
+fi
+
+# check commands
+if [ "$1" == "push" ]
+then
+  shift
+  push "$1"
+  shift
+elif [ "$1" == "pull" ]
+then
+  shift
+  pull "$1"
+  shift
+elif [ "$1" == "remote" ]
+then
+  cmd="$1"
+  shift
+  # check command options to perform
+  case "$1" in
+      add)
+        opt="$1"
+        shift
+        remote_name="$1"
+        shift
+        remote_url="$1"
+        add_remote "${cmd}" "${opt}" "${remote_name}" "${remote_url}"
+        ;;
+      remove)
+        opt="$1"
+        shift
+        remote_name="$1"
+        shift
+        remote_url="$1"
+        remove_remote "${cmd}" "${opt}" "${remote_name}" "${remote_url}"
+        ;;
+      list|-v)
+        cat "${CONFIG}"
+        exit 0
+        ;;
+      *)         # unknown option
+        usage
+        ;;
+  esac
+else
+  usage
+fi
+
+# check options
+for i in "$@"
+do
+  validate_options "$i"
+
+  # check for short notation
+  if [ ! -z "${CHECK_SHORT}" ]
+  then
+    for j in $(echo "$i" | sed 's/-//g' | grep -o .)
+    do
+      CHECK_SHORT=
+      validate_options "-${j}"
+
+      if [ ! -z "${CHECK_SHORT}" ]
+      then
+        usage
+      fi
+    done
+  fi
+done
+
+# clean duplicate options
+XOPT=$(echo "${XOPT}" | xargs -n1 | sort -u | xargs)
+
+rsync \
+      --exclude="Icon
+
+ "\
+      --exclude=".DS_Store" \
+      --exclude=".htaccess" \
+      --exclude="${CONFIG}" \
+      --exclude=".*" \
+      ${XOPT} -e "ssh -T -c aes128-ctr -o Compression=no -x" "${PATH_1}" "${PATH_2}"
